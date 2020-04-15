@@ -29,10 +29,10 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
         require(msg.sender == ds.contractOwner, "Must own the contract.");
         SlotInfo memory slot;
         slot.originalSelectorSlotsLength = ds.selectorSlotsLength;
-        uint selectorSlotsLength = uint128(slot.originalSelectorSlotsLength);
-        uint selectorSlotLength = uint128(slot.originalSelectorSlotsLength >> 128);
-        if(selectorSlotLength > 0) {
-            slot.selectorSlot = ds.selectorSlots[selectorSlotsLength];
+        uint selectorSlotArrayLength = uint128(slot.originalSelectorSlotsLength);
+        uint selectorFinalSlotLength = uint128(slot.originalSelectorSlotsLength >> 128);
+        if(selectorFinalSlotLength > 0) {
+            slot.selectorSlot = ds.selectorSlots[selectorSlotArrayLength]; // ??? -1?
         }
         // loop through diamond cut
         for(uint diamondCutIndex; diamondCutIndex < _diamondCut.length; diamondCutIndex++) {
@@ -58,14 +58,14 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                     bytes32 oldFacet = ds.facets[selector];
                     // add
                     if(oldFacet == 0) {
-                        ds.facets[selector] = newFacet | bytes32(selectorSlotLength) << 64 | bytes32(selectorSlotsLength);
-                        slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> selectorSlotLength * 32) | bytes32(selector) >> selectorSlotLength * 32;
-                        selectorSlotLength++;
-                        if(selectorSlotLength == 8) {
-                            ds.selectorSlots[selectorSlotsLength] = slot.selectorSlot;
+                        ds.facets[selector] = newFacet | bytes32(selectorFinalSlotLength) << 64 | bytes32(selectorSlotArrayLength);
+                        slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> selectorFinalSlotLength * 32) | bytes32(selector) >> selectorFinalSlotLength * 32;
+                        selectorFinalSlotLength++;
+                        if(selectorFinalSlotLength == 8) {
+                            ds.selectorSlots[selectorSlotArrayLength] = slot.selectorSlot;
                             slot.selectorSlot = 0;
-                            selectorSlotLength = 0;
-                            selectorSlotsLength++;
+                            selectorFinalSlotLength = 0;
+                            selectorSlotArrayLength++;
                             slot.newSlot = false;
                         }
                         else {
@@ -90,25 +90,25 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                     bytes32 oldFacet = ds.facets[selector];
                     require(oldFacet != 0, "Function doesn't exist. Can't remove.");
                     if(slot.selectorSlot == 0) {
-                        selectorSlotsLength--;
-                        slot.selectorSlot = ds.selectorSlots[selectorSlotsLength];
-                        selectorSlotLength = 8;
+                        selectorSlotArrayLength--;
+                        slot.selectorSlot = ds.selectorSlots[selectorSlotArrayLength];
+                        selectorFinalSlotLength = 8;
                     }
                     slot.oldSelectorSlotsIndex = uint64(uint(oldFacet));
                     slot.oldSelectorSlotIndex = uint32(uint(oldFacet >> 64));
-                    bytes4 lastSelector = bytes4(slot.selectorSlot << (selectorSlotLength-1) * 32);
-                    if(slot.oldSelectorSlotsIndex != selectorSlotsLength) {
+                    bytes4 lastSelector = bytes4(slot.selectorSlot << (selectorFinalSlotLength-1) * 32);
+                    if(slot.oldSelectorSlotsIndex != selectorSlotArrayLength) {
                         slot.oldSelectorSlot = ds.selectorSlots[slot.oldSelectorSlotsIndex];
                         slot.oldSelectorSlot = slot.oldSelectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorSlotIndex * 32) | bytes32(lastSelector) >> slot.oldSelectorSlotIndex * 32;
                         ds.selectorSlots[slot.oldSelectorSlotsIndex] = slot.oldSelectorSlot;
-                        selectorSlotLength--;
+                        selectorFinalSlotLength--;
                     }
                     else {
                         slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorSlotIndex * 32) | bytes32(lastSelector) >> slot.oldSelectorSlotIndex * 32;
-                        selectorSlotLength--;
+                        selectorFinalSlotLength--;
                     }
-                    if(selectorSlotLength == 0) {
-                        delete ds.selectorSlots[selectorSlotsLength];
+                    if(selectorFinalSlotLength == 0) {
+                        delete ds.selectorSlots[selectorSlotArrayLength];
                         slot.selectorSlot = 0;
                     }
                     if(lastSelector != selector) {
@@ -118,12 +118,12 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                 }
             }
         }
-        uint newSelectorSlotsLength = selectorSlotLength << 128 | selectorSlotsLength;
+        uint newSelectorSlotsLength = selectorFinalSlotLength << 128 | selectorSlotArrayLength;
         if(newSelectorSlotsLength != slot.originalSelectorSlotsLength) {
             ds.selectorSlotsLength = newSelectorSlotsLength;
         }
         if(slot.newSlot) {
-            ds.selectorSlots[selectorSlotsLength] = slot.selectorSlot;
+            ds.selectorSlots[selectorSlotArrayLength] = slot.selectorSlot;
         }
         emit DiamondCut(_diamondCut);
     }
