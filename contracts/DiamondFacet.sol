@@ -29,22 +29,29 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
         require(msg.sender == ds.contractOwner, "Must own the contract.");
         SlotInfo memory slot;
         slot.originalSelectorSlotsLength = ds.selectorSlotsLength;
+        // Unpack selectorSlotsLength, which is a concatenation of the array length
+        // and the number of selectors in the last slot in the array
         uint selectorSlotArrayLength = uint128(slot.originalSelectorSlotsLength);
         uint selectorFinalSlotLength = uint128(slot.originalSelectorSlotsLength >> 128);
+        // If the last slot contains any selectors, load them
         if(selectorFinalSlotLength > 0) {
             slot.selectorSlot = ds.selectorSlots[selectorSlotArrayLength]; // ??? -1?
         }
-        // loop through diamond cut
+        // Loop through the edited facets in the diamond cut
         for(uint diamondCutIndex; diamondCutIndex < _diamondCut.length; diamondCutIndex++) {
             bytes memory facetCut = _diamondCut[diamondCutIndex];
+            // A facet cut should have an address (length 20) and at least one selector
             require(facetCut.length > 20, "Missing facet or selector info.");
+            // Load the new facet address. In memory, the 'bytes' type is a uint256 length
+            // followed by the byte values, the first 20 of which are the facet address.
+            // We mload the contents (mload loads 32 bytes) and truncate it to 20.
             bytes32 currentSlot;
             assembly {
                 currentSlot := mload(add(facetCut,32))
             }
             bytes32 newFacet = bytes20(currentSlot);
             uint numSelectors = (facetCut.length - 20) / 4;
-            uint position = 52;
+            uint position = 52; // (length = 32 + address_bytes = 20)
             
             // adding or replacing functions
             if(newFacet != 0) {
