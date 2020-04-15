@@ -20,8 +20,8 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
     struct SlotInfo {
         uint originalSelectorSlotsLength;
         bytes32 selectorSlot;
-        uint oldSelectorSlotsIndex;
-        uint oldSelectorSlotIndex;
+        uint oldSelectorArrayIndex;
+        uint oldSelectorIndexWithinSlot;
         bytes32 oldSelectorSlot;
         bool newSlot;
     }
@@ -31,13 +31,13 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
         require(msg.sender == ds.contractOwner, "Must own the contract.");
         SlotInfo memory slot;
         slot.originalSelectorSlotsLength = ds.selectorSlotsLength;
-        uint selectorSlotArrayLength = uint128(slot.originalSelectorSlotsLength);
         // Unpack selectorSlotsLength, which is a concatenation of the number of
         // full slots and the number of selectors in the last slot in the array
+        uint selectorNumFullSlots = uint128(slot.originalSelectorSlotsLength);
         uint selectorFinalSlotLength = uint128(slot.originalSelectorSlotsLength >> 128);
         // If the last slot contains any selectors, load them
         if(selectorFinalSlotLength > 0) {
-            slot.selectorSlot = ds.selectorSlots[selectorSlotArrayLength]; // ??? -1?
+            slot.selectorSlot = ds.selectorSlots[selectorNumFullSlots];
         }
         // Loop through the edited facets in the diamond cut
         for(uint diamondCutIndex; diamondCutIndex < _diamondCut.length; diamondCutIndex++) {
@@ -53,7 +53,7 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
             }
             bytes32 newFacet = bytes20(currentSlot);
             uint numSelectors = (facetCut.length - 20) / 4;
-            uint position = 52; // (length = 32 + address_bytes = 20)
+            uint position = 52; // (length_uint256 = 32 + facet_address = 20)
             
             // adding or replacing functions
             if(newFacet != 0) {
@@ -65,20 +65,20 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                     }
                     position += 4;
                     bytes32 oldFacet = ds.facets[selector];
-                    // add
+                    // add a selector
                     if(oldFacet == 0) {
-                        ds.facets[selector] = newFacet | bytes32(selectorFinalSlotLength) << 64 | bytes32(selectorSlotArrayLength);
                         // The new facet is the concatenation of the address and the place of the function selector in the
                         // selector slots array; this location is 'past the end' since we'll add it there
+                        ds.facets[selector] = newFacet | bytes32(selectorFinalSlotLength) << 64 | bytes32(selectorNumFullSlots);
                         // The new selector is also saved in the selector slots array
                         slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> selectorFinalSlotLength * 32) | bytes32(selector) >> selectorFinalSlotLength * 32;
                         // Bookkeeping: if this fills up the slot, allocate a new one
                         selectorFinalSlotLength++;
                         if(selectorFinalSlotLength == 8) {
-                            ds.selectorSlots[selectorSlotArrayLength] = slot.selectorSlot;
+                            ds.selectorSlots[selectorNumFullSlots] = slot.selectorSlot;
                             slot.selectorSlot = 0;
                             selectorFinalSlotLength = 0;
-                            selectorSlotArrayLength++;
+                            selectorNumFullSlots++;
                             // Since we manually wrote the cache to storage, no need to mark it dirty
                             slot.newSlot = false;
                         }
@@ -109,31 +109,31 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                     // We'll shrink the selector storage by one. If the last slot is empty, we'll
                     // remove one from the slot before that. So, load it.
                     if(slot.selectorSlot == 0) {
-                        selectorSlotArrayLength--;
-                        slot.selectorSlot = ds.selectorSlots[selectorSlotArrayLength];
+                        selectorNumFullSlots--;
+                        slot.selectorSlot = ds.selectorSlots[selectorNumFullSlots];
                         selectorFinalSlotLength = 8;
                     }
-                    slot.oldSelectorSlotsIndex = uint64(uint(oldFacet));
-                    slot.oldSelectorSlotIndex = uint32(uint(oldFacet >> 64));
                     // Load the location of the slot to be removed in the selector slot array
+                    slot.oldSelectorArrayIndex = uint64(uint(oldFacet));
+                    slot.oldSelectorIndexWithinSlot = uint32(uint(oldFacet >> 64));
                     // We'll swap the last selector in the last occupied slot with the one
                     // that'll be removed, so load it now
                     bytes4 lastSelector = bytes4(slot.selectorSlot << (selectorFinalSlotLength-1) * 32);
-                    if(slot.oldSelectorSlotsIndex != selectorSlotArrayLength) {
-                        slot.oldSelectorSlot = ds.selectorSlots[slot.oldSelectorSlotsIndex];
-                        slot.oldSelectorSlot = slot.oldSelectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorSlotIndex * 32) | bytes32(lastSelector) >> slot.oldSelectorSlotIndex * 32;
-                        ds.selectorSlots[slot.oldSelectorSlotsIndex] = slot.oldSelectorSlot;
                     // If the selector we'll remove is in another slot, load that one and do the swap
+                    if(slot.oldSelectorArrayIndex != selectorNumFullSlots) {
+                        slot.oldSelectorSlot = ds.selectorSlots[slot.oldSelectorArrayIndex];
+                        slot.oldSelectorSlot = slot.oldSelectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorIndexWithinSlot * 32) | bytes32(lastSelector) >> slot.oldSelectorIndexWithinSlot * 32;
+                        ds.selectorSlots[slot.oldSelectorArrayIndex] = slot.oldSelectorSlot;
                         selectorFinalSlotLength--;
                     }
                     // If the selector we'll remove is in the same slot, swap immediately
                     else {
-                        slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorSlotIndex * 32) | bytes32(lastSelector) >> slot.oldSelectorSlotIndex * 32;
+                        slot.selectorSlot = slot.selectorSlot & ~(CLEAR_SELECTOR_MASK >> slot.oldSelectorIndexWithinSlot * 32) | bytes32(lastSelector) >> slot.oldSelectorIndexWithinSlot * 32;
                         selectorFinalSlotLength--;
                     }
                     // If the last slot is now empty, we remove it from the array
                     if(selectorFinalSlotLength == 0) {
-                        delete ds.selectorSlots[selectorSlotArrayLength];
+                        delete ds.selectorSlots[selectorNumFullSlots];
                         slot.selectorSlot = 0;
                     }
                     // Also make sure the new location of the formerly last selector is correctly
@@ -146,15 +146,16 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                 }
             }
         }
-        uint newSelectorSlotsLength = selectorFinalSlotLength << 128 | selectorSlotArrayLength;
         // Update selector slot length in storage
+        uint newSelectorSlotsLength = selectorFinalSlotLength << 128 | selectorNumFullSlots;
         if(newSelectorSlotsLength != slot.originalSelectorSlotsLength) {
             ds.selectorSlotsLength = newSelectorSlotsLength;
         }
         // Write slot cache to storage if it is marked dirty
         if(slot.newSlot) {
-            ds.selectorSlots[selectorSlotArrayLength] = slot.selectorSlot;
+            ds.selectorSlots[selectorNumFullSlots] = slot.selectorSlot;
         }
+        // ??? I don't think the dirty flag is ever set during removal. Intentional?
 
         emit DiamondCut(_diamondCut);
     }
