@@ -47,7 +47,7 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
             // We mload the contents (mload loads 32 bytes) and truncate it to 20.
             bytes32 currentSlot;
             assembly {
-                currentSlot := mload(add(facetCut,32))
+                currentSlot := mload(add(facetCut, 32))
             }
             bytes32 newFacet = bytes20(currentSlot);
             uint numSelectors = (facetCut.length - 20) / 4;
@@ -59,7 +59,7 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                 for(uint selectorIndex; selectorIndex < numSelectors; selectorIndex++) {
                     bytes4 selector;
                     assembly {
-                        selector := mload(add(facetCut,position))
+                        selector := mload(add(facetCut, position))
                     }
                     position += 4;
                     bytes32 oldFacet = ds.facets[selector];
@@ -91,7 +91,7 @@ contract DiamondFacet is Diamond, DiamondStorageContract {
                 for(uint selectorIndex; selectorIndex < numSelectors; selectorIndex++) {
                     bytes4 selector;
                     assembly {
-                        selector := mload(add(facetCut,position))
+                        selector := mload(add(facetCut, position))
                     }
                     position += 4;
                     bytes32 oldFacet = ds.facets[selector];
